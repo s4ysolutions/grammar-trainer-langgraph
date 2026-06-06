@@ -149,6 +149,8 @@ def _get_llms():
         fb_provider = os.getenv(f"FALLBACK{i}_PROVIDER", "").lower()
         if not fb_provider or fb_provider not in _PROVIDER_DEFAULTS:
             continue
+        if not os.getenv(_PROVIDER_KEY_ENV[fb_provider]):
+            continue
         fb_default = _PROVIDER_DEFAULTS[fb_provider]
         fb_gen = os.getenv(f"FALLBACK{i}_GENERATOR_MODEL") or fb_default
         fb_grd = os.getenv(f"FALLBACK{i}_GRADER_MODEL") or fb_default
