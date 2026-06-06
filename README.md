@@ -73,6 +73,7 @@ WEBHOOK_URL=https://<ngrok-id>.ngrok.io/hook uv run python -m tgbot.webhook
 | `/start` | Start new session, ask for language |
 | `/lang <language>` | Change language, restart from topic selection |
 | `/topic <topic>` | Change topic, restart exercises |
+| `/continue` | Start new exercise on same topic (use after rate-limit interruption) |
 | `/end` | End session, show stats |
 
 ## Tests

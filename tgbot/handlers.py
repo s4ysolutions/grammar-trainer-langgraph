@@ -25,6 +25,7 @@ graph = build_graph()
 
 _user_sessions: dict[int, int] = {}
 _user_languages: dict[int, str] = {}
+_user_topics: dict[int, str] = {}
 
 
 def _config(chat_id: int) -> dict:
@@ -68,10 +69,11 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lang = _user_languages.get(chat_id, "")
     if not lang:
-        config = _new_session(chat_id)
-        await graph.ainvoke(make_initial_state(), config=config)
-        await update.message.reply_text(messages.WELCOME)
+        await update.message.reply_text(
+            "Сначала укажи язык: /lang English  или начни с /start"
+        )
         return
+    _user_topics[chat_id] = topic
     config = _new_session(chat_id)
     try:
         state = await graph.ainvoke(
@@ -111,6 +113,35 @@ async def cmd_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    lang = _user_languages.get(chat_id, "")
+    topic = _user_topics.get(chat_id, "")
+    if not lang or not topic:
+        await update.message.reply_text(messages.NO_SESSION)
+        return
+    _user_topics[chat_id] = topic
+    config = _new_session(chat_id)
+    try:
+        state = await graph.ainvoke(
+            make_initial_state(phase="active", language=lang, topic=topic),
+            config=config,
+        )
+    except openai.RateLimitError:
+        logger.warning("cmd_continue: rate limited for chat_id=%s", chat_id)
+        _user_sessions.pop(chat_id, None)
+        await update.message.reply_text(messages.RATE_LIMIT)
+        return
+    except Exception:
+        logger.exception("cmd_continue: graph.ainvoke failed for chat_id=%s", chat_id)
+        await update.message.reply_text(messages.ERROR)
+        return
+    exercise = state.get("last_exercise", "")
+    await update.message.reply_text(
+        f"{exercise}\n\n{messages.NEXT_PROMPT}" if exercise else messages.ERROR
+    )
+
+
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in _user_sessions:
@@ -147,6 +178,9 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(messages.CHOOSE_TOPIC)
         return
 
+    if state.get("topic"):
+        _user_topics[chat_id] = state["topic"]
+
     reply_parts = []
     verdict = state.get("last_verdict", "")
     feedback = state.get("feedback", "")
@@ -168,6 +202,7 @@ def build_app(token: str) -> Application:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("lang", cmd_lang))
     app.add_handler(CommandHandler("topic", cmd_topic))
+    app.add_handler(CommandHandler("continue", cmd_continue))
     app.add_handler(CommandHandler("end", cmd_end))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     return app
