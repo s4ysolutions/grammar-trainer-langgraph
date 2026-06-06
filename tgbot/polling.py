@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tgbot.handlers import build_app
+from tgbot.log_config import apply_quiet_loggers
 
 
 def main():
@@ -22,6 +23,7 @@ def main():
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN not set")
         sys.exit(1)
+    apply_quiet_loggers()
     app = build_app(token)
     logger.info("Starting polling...")
     app.run_polling()
