@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import socket
+import time
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
@@ -185,7 +186,9 @@ def _invoke_rotating(prompt: str, role: Literal["generator", "grader"]) -> str:
         llm = _make_llm(cfg[role], temperature, cfg["provider"])
         try:
             logger.info("LLM invoke: provider=%s model=%s role=%s", cfg["provider"], cfg[role], role)
+            t0 = time.monotonic()
             result = _extract_text(llm.invoke(prompt))
+            logger.info("LLM done: provider=%s model=%s role=%s duration=%.2fs", cfg["provider"], cfg[role], role, time.monotonic() - t0)
             if attempt > 0:
                 logger.warning("Rate limit: rotated active provider to '%s'", cfg["provider"])
                 _active_idx = idx
