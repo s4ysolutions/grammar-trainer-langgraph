@@ -72,12 +72,18 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(messages.WELCOME)
         return
     config = _new_session(chat_id)
-    state = await graph.ainvoke(
-        make_initial_state(phase="active", language=lang, topic=topic),
-        config=config,
-    )
+    try:
+        state = await graph.ainvoke(
+            make_initial_state(phase="active", language=lang, topic=topic),
+            config=config,
+        )
+    except Exception:
+        logger.exception("cmd_topic: graph.ainvoke failed for chat_id=%s", chat_id)
+        await update.message.reply_text(messages.ERROR)
+        return
+    exercise = state.get("last_exercise", "")
     await update.message.reply_text(
-        f"{state['last_exercise']}\n\n{messages.NEXT_PROMPT}"
+        f"{exercise}\n\n{messages.NEXT_PROMPT}" if exercise else messages.ERROR
     )
 
 

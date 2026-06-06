@@ -24,6 +24,8 @@ TOPIC_CHANGED = "Тема изменена: {topic}. Начинаем новое
 
 NO_SESSION = "Используй /start чтобы начать сессию."
 
+ERROR = "Произошла ошибка. Попробуй ещё раз или начни сессию заново с /start."
+
 _ui_lang = os.getenv("UI_LANG", "").strip().lower()
 if _ui_lang:
     _locale_file = Path(__file__).parent / f"messages-{_ui_lang}.py"
