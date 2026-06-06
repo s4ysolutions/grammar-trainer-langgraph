@@ -119,11 +119,12 @@ def validate_config() -> None:
 
 def _make_llm(model: str, temperature: float, provider: str):
     if provider == "openai":
-        return ChatOpenAI(model=model, temperature=temperature)
+        return ChatOpenAI(model=model, temperature=temperature, max_retries=0)
     if provider == "huggingface":
         return ChatOpenAI(
             model=model,
             temperature=temperature,
+            max_retries=0,
             openai_api_key=os.getenv("HUGGINGFACE_API_KEY", ""),
             openai_api_base=_huggingface_base_url(),
         )
@@ -131,6 +132,7 @@ def _make_llm(model: str, temperature: float, provider: str):
         return ChatOpenAI(
             model=model,
             temperature=temperature,
+            max_retries=0,
             openai_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             openai_api_base=_openrouter_base_url(),
         )
