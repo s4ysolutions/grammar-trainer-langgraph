@@ -2,6 +2,7 @@ import json
 import os
 import re
 import socket
+from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -52,6 +53,7 @@ def _tcp_probe(url: str, label: str) -> None:
         ) from e
 
 
+@lru_cache(maxsize=1)
 def validate_config() -> None:
     provider = os.getenv("LLM_PROVIDER", "gemini").lower()
     valid = set(_PROVIDER_DEFAULTS)
