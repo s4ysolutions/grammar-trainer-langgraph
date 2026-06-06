@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import socket
@@ -6,9 +7,18 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
 
+import openai
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
+
+logger = logging.getLogger(__name__)
+
+try:
+    from google.api_core.exceptions import ResourceExhausted as _GoogleRateLimitError
+    _RATE_LIMIT_EXCEPTIONS = (openai.RateLimitError, _GoogleRateLimitError)
+except ImportError:
+    _RATE_LIMIT_EXCEPTIONS = (openai.RateLimitError,)
 
 from .state import TutorState
 from .prompts import EXERCISE_PROMPT, GRADE_PROMPT
@@ -86,10 +96,28 @@ def validate_config() -> None:
             "OPENROUTER_BASE_URL", _OPENROUTER_DEFAULT_BASE_URL,
         )
 
+    for i in (1, 2):
+        fb_provider = os.getenv(f"FALLBACK{i}_PROVIDER", "").lower()
+        if not fb_provider:
+            continue
+        if fb_provider not in valid:
+            logger.warning(
+                "FALLBACK%d_PROVIDER='%s' not supported, ignoring. Valid: %s",
+                i, fb_provider, ", ".join(sorted(valid)),
+            )
+            continue
+        fb_key_var = _PROVIDER_KEY_ENV[fb_provider]
+        if not os.getenv(fb_key_var):
+            logger.warning(
+                "FALLBACK%d_PROVIDER='%s' requires %s — fallback will be skipped",
+                i, fb_provider, fb_key_var,
+            )
 
-def _make_llm(model: str, temperature: float):
-    provider = os.getenv("LLM_PROVIDER", "gemini").lower()
-    validate_config()
+
+def _make_llm(model: str, temperature: float, provider: str | None = None):
+    if provider is None:
+        provider = os.getenv("LLM_PROVIDER", "gemini").lower()
+        validate_config()
     if provider == "openai":
         return ChatOpenAI(model=model, temperature=temperature)
     if provider == "huggingface":
@@ -114,6 +142,24 @@ def _get_llms():
     default = _PROVIDER_DEFAULTS.get(provider, "gemma-4-26b-a4b-it")
     generator = _make_llm(os.getenv("GENERATOR_MODEL") or default, 0.7)
     grader = _make_llm(os.getenv("GRADER_MODEL") or default, 0.0)
+
+    fb_generators = []
+    fb_graders = []
+    for i in (1, 2):
+        fb_provider = os.getenv(f"FALLBACK{i}_PROVIDER", "").lower()
+        if not fb_provider or fb_provider not in _PROVIDER_DEFAULTS:
+            continue
+        fb_default = _PROVIDER_DEFAULTS[fb_provider]
+        fb_gen = os.getenv(f"FALLBACK{i}_GENERATOR_MODEL") or fb_default
+        fb_grd = os.getenv(f"FALLBACK{i}_GRADER_MODEL") or fb_default
+        fb_generators.append(_make_llm(fb_gen, 0.7, fb_provider))
+        fb_graders.append(_make_llm(fb_grd, 0.0, fb_provider))
+
+    if fb_generators:
+        generator = generator.with_fallbacks(fb_generators, exceptions_to_handle=_RATE_LIMIT_EXCEPTIONS)
+    if fb_graders:
+        grader = grader.with_fallbacks(fb_graders, exceptions_to_handle=_RATE_LIMIT_EXCEPTIONS)
+
     return generator, grader
 
 
