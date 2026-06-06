@@ -27,6 +27,7 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | For bot | Token from @BotFather |
 | `WEBHOOK_URL` | Webhook mode | Public URL, e.g. `https://abc.ngrok.io/hook` |
 | `PORT` | Webhook mode | Local port (default `8443`) |
+| `TELEGRAM_WEBHOOK_SECRET` | Webhook mode | Secret token Telegram sends in `X-Telegram-Bot-Api-Secret-Token`; requests without it are rejected with 401. Generate with `uv run python -m cli.gen_secret` |
 
 ## Launch
 
@@ -57,6 +58,9 @@ uv run python -m tgbot.polling
 ### Telegram bot — webhook (prod)
 
 ```bash
+# Generate and save a webhook secret (one-time):
+uv run python -m cli.gen_secret
+
 # With ngrok:
 ngrok http 8443
 WEBHOOK_URL=https://<ngrok-id>.ngrok.io/hook uv run python -m tgbot.webhook
