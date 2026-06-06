@@ -25,7 +25,8 @@ from .state import TutorState
 from .prompts import EXERCISE_PROMPT, GRADE_PROMPT
 
 _provider_configs: list[dict] | None = None
-_active_idx: int = 0
+_rate_limited_until: dict[str, float] = {}
+_PROVIDER_COOLDOWN = int(os.getenv("PROVIDER_COOLDOWN", "300"))
 
 
 _PROVIDER_DEFAULTS = {
@@ -175,26 +176,24 @@ def _get_provider_configs() -> list[dict]:
 
 
 def _invoke_rotating(prompt: str, role: Literal["generator", "grader"]) -> str:
-    global _active_idx
     configs = _get_provider_configs()
     temperature = 0.7 if role == "generator" else 0.0
-    n = len(configs)
+    now = time.monotonic()
+    available = [c for c in configs if now >= _rate_limited_until.get(c["provider"], 0)]
+    cooling = [c for c in configs if now < _rate_limited_until.get(c["provider"], 0)]
     last_exc: Exception | None = None
-    for attempt in range(n):
-        idx = (_active_idx + attempt) % n
-        cfg = configs[idx]
+    for cfg in available + cooling:
         llm = _make_llm(cfg[role], temperature, cfg["provider"])
         try:
             logger.info("LLM invoke: provider=%s model=%s role=%s", cfg["provider"], cfg[role], role)
             t0 = time.monotonic()
             result = _extract_text(llm.invoke(prompt))
             logger.info("LLM done: provider=%s model=%s role=%s duration=%.2fs", cfg["provider"], cfg[role], role, time.monotonic() - t0)
-            if attempt > 0:
-                logger.warning("Rate limit: rotated active provider to '%s'", cfg["provider"])
-                _active_idx = idx
             return result
         except _RATE_LIMIT_EXCEPTIONS as e:
-            logger.warning("Rate limit on provider '%s'", cfg["provider"])
+            until = time.monotonic() + _PROVIDER_COOLDOWN
+            _rate_limited_until[cfg["provider"]] = until
+            logger.warning("Rate limit on provider '%s', cooldown %ds", cfg["provider"], _PROVIDER_COOLDOWN)
             last_exc = e
     raise openai.RateLimitError("All LLM providers rate-limited") from last_exc
 
