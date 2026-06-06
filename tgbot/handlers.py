@@ -99,6 +99,7 @@ async def cmd_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = state.get("turn_count", 0)
     correct = state.get("correct_count", 0)
     pct = round(correct / total * 100) if total else 0
+    _user_sessions.pop(chat_id, None)
     await update.message.reply_text(
         messages.STATS.format(correct=correct, total=total, pct=pct)
     )
@@ -124,6 +125,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total = state.get("turn_count", 0)
         correct = state.get("correct_count", 0)
         pct = round(correct / total * 100) if total else 0
+        _user_sessions.pop(chat_id, None)
         await update.message.reply_text(
             messages.STATS.format(correct=correct, total=total, pct=pct)
         )
