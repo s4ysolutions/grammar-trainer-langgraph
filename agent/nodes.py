@@ -163,6 +163,11 @@ def _get_provider_configs() -> list[dict]:
             "grader": os.getenv(f"FALLBACK{i}_GRADER_MODEL") or fb_default,
         })
     _provider_configs = configs
+    chain_desc = " -> ".join(
+        f"{c['provider']}(gen={c['generator']}, grade={c['grader']})"
+        for c in configs
+    )
+    logger.info("LLM provider chain: %s", chain_desc)
     return configs
 
 
@@ -177,6 +182,7 @@ def _invoke_rotating(prompt: str, role: Literal["generator", "grader"]) -> str:
         cfg = configs[idx]
         llm = _make_llm(cfg[role], temperature, cfg["provider"])
         try:
+            logger.info("LLM invoke: provider=%s model=%s role=%s", cfg["provider"], cfg[role], role)
             result = _extract_text(llm.invoke(prompt))
             if attempt > 0:
                 logger.warning("Rate limit: rotated active provider to '%s'", cfg["provider"])
