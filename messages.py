@@ -26,6 +26,11 @@ NO_SESSION = "Используй /start чтобы начать сессию."
 
 ERROR = "Произошла ошибка. Попробуй ещё раз или начни сессию заново с /start."
 
+RATE_LIMIT = (
+    "Провайдер перегружен (429). Подожди минуту и попробуй снова — "
+    "используй /topic чтобы начать упражнение заново."
+)
+
 _ui_lang = os.getenv("UI_LANG", "").strip().lower()
 if _ui_lang:
     _locale_file = Path(__file__).parent / f"messages-{_ui_lang}.py"
