@@ -40,16 +40,23 @@ def _openrouter_base_url() -> str:
     return os.getenv("OPENROUTER_BASE_URL", _OPENROUTER_DEFAULT_BASE_URL)
 
 
-def _tcp_probe(url: str, label: str) -> None:
+def _tcp_probe(url: str, label: str, url_env_var: str, default_url: str) -> None:
     parsed = urlparse(url)
     host = parsed.hostname or ""
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if not host:
+        raise ValueError(
+            f"Cannot connect to {label}: URL is empty or invalid (resolved to '{url}'). "
+            f"Unset {url_env_var} to use the default ({default_url}), "
+            f"or set it to a valid URL."
+        )
     try:
         socket.create_connection((host, port), timeout=5).close()
     except OSError as e:
         raise ValueError(
-            f"Cannot connect to {label} at {url}: {e}. "
-            f"Check your network or endpoint configuration."
+            f"Cannot connect to {label} at {url} (host={host}, port={port}): {e}. "
+            f"Check your network or set {url_env_var} to override "
+            f"(default: {default_url})."
         ) from e
 
 
@@ -69,9 +76,15 @@ def validate_config() -> None:
             f"Add it to your .env file or environment."
         )
     if provider == "huggingface":
-        _tcp_probe(_huggingface_base_url(), "HuggingFace API")
+        _tcp_probe(
+            _huggingface_base_url(), "HuggingFace API",
+            "HUGGINGFACE_BASE_URL", _HUGGINGFACE_DEFAULT_BASE_URL,
+        )
     elif provider == "openrouter":
-        _tcp_probe(_openrouter_base_url(), "OpenRouter API")
+        _tcp_probe(
+            _openrouter_base_url(), "OpenRouter API",
+            "OPENROUTER_BASE_URL", _OPENROUTER_DEFAULT_BASE_URL,
+        )
 
 
 def _make_llm(model: str, temperature: float):
