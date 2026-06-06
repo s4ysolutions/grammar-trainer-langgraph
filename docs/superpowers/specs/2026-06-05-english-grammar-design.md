@@ -61,7 +61,7 @@ class TutorState(TypedDict):
 - `"language"` → `collect_language` node
 - `"topic"` → `collect_topic` node
 - `"active"` → exercise loop
-- `"done"` → `show_stats` → END
+- `"done"` → END (stats displayed by CLI/bot handlers)
 
 ---
 
@@ -77,10 +77,10 @@ START
   → route_verdict      (conditional edge)
       CORRECT   → on_correct   → update_state → generate_exercise
       INCORRECT → on_incorrect → update_state → generate_exercise
-      /end      → show_stats   → END
+      /end      → END
 ```
 
-`/end` detected in `wait_for_answer` node: if input equals `/end`, sets `phase="done"` and returns without calling `check_answer`. Conditional edge after `wait_for_answer` routes to `show_stats` when `phase=="done"`, else to `check_answer`.
+`/end` detected in `wait_for_answer` node: if input equals `/end`, sets `phase="done"` and returns without calling `check_answer`. Conditional edge after `wait_for_answer` routes to `END` when `phase=="done"`, else to `check_answer`. Stats are displayed by the CLI and bot handlers, not by a graph node.
 
 ---
 
