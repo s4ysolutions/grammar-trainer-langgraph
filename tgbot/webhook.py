@@ -34,6 +34,13 @@ def main():
     port = int(os.environ.get("PORT", "8443"))
     url_path = urlparse(webhook_url).path.lstrip("/")
 
+    secret_token = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if not secret_token:
+        logger.warning(
+            "TELEGRAM_WEBHOOK_SECRET not set — webhook accepts requests from any source. "
+            "Run: uv run python -m cli.gen_secret"
+        )
+
     app = build_app(token)
     logger.info("Starting webhook on port %d, path /%s...", port, url_path)
     app.run_webhook(
@@ -41,6 +48,7 @@ def main():
         port=port,
         url_path=url_path,
         webhook_url=webhook_url,
+        secret_token=secret_token,
     )
 
 
