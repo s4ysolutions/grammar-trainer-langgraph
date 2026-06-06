@@ -33,11 +33,11 @@ _OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def _huggingface_base_url() -> str:
-    return os.getenv("HUGGINGFACE_BASE_URL", _HUGGINGFACE_DEFAULT_BASE_URL)
+    return os.getenv("HUGGINGFACE_BASE_URL") or _HUGGINGFACE_DEFAULT_BASE_URL
 
 
 def _openrouter_base_url() -> str:
-    return os.getenv("OPENROUTER_BASE_URL", _OPENROUTER_DEFAULT_BASE_URL)
+    return os.getenv("OPENROUTER_BASE_URL") or _OPENROUTER_DEFAULT_BASE_URL
 
 
 def _tcp_probe(url: str, label: str, url_env_var: str, default_url: str) -> None:
