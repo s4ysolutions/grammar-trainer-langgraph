@@ -1,6 +1,7 @@
 import logging
 import os
 
+import openai
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -77,6 +78,11 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
             make_initial_state(phase="active", language=lang, topic=topic),
             config=config,
         )
+    except openai.RateLimitError:
+        logger.warning("cmd_topic: rate limited for chat_id=%s", chat_id)
+        _user_sessions.pop(chat_id, None)
+        await update.message.reply_text(messages.RATE_LIMIT)
+        return
     except Exception:
         logger.exception("cmd_topic: graph.ainvoke failed for chat_id=%s", chat_id)
         await update.message.reply_text(messages.ERROR)
@@ -116,6 +122,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         state = await graph.ainvoke(Command(resume=text), config=config)
+    except openai.RateLimitError:
+        logger.warning("on_message: rate limited for chat_id=%s", chat_id)
+        _user_sessions.pop(chat_id, None)
+        await update.message.reply_text(messages.RATE_LIMIT)
+        return
     except Exception:
         logger.exception("on_message: graph.ainvoke failed for chat_id=%s", chat_id)
         await update.message.reply_text(messages.NO_SESSION)
