@@ -13,7 +13,7 @@ from agent.nodes import validate_config, _get_llms, _extract_text
 
 
 def main():
-    provider = os.getenv("LLM_PROVIDER", "gemini")
+    provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     print(f"Provider : {provider}")
 
     print("Config   : checking...")

@@ -45,7 +45,7 @@ def list_openrouter():
 
 
 def main():
-    provider = os.getenv("LLM_PROVIDER", "gemini")
+    provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     print(f"Provider: {provider}\n")
     try:
         validate_config()
