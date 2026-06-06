@@ -23,6 +23,9 @@ except ImportError:
 from .state import TutorState
 from .prompts import EXERCISE_PROMPT, GRADE_PROMPT
 
+_provider_configs: list[dict] | None = None
+_active_idx: int = 0
+
 
 _PROVIDER_DEFAULTS = {
     "openai": "gpt-5-nano",
@@ -114,10 +117,7 @@ def validate_config() -> None:
             )
 
 
-def _make_llm(model: str, temperature: float, provider: str | None = None):
-    if provider is None:
-        provider = os.getenv("LLM_PROVIDER", "gemini").lower()
-        validate_config()
+def _make_llm(model: str, temperature: float, provider: str):
     if provider == "openai":
         return ChatOpenAI(model=model, temperature=temperature)
     if provider == "huggingface":
@@ -137,14 +137,19 @@ def _make_llm(model: str, temperature: float, provider: str | None = None):
     return ChatGoogleGenerativeAI(model=model, temperature=temperature)
 
 
-def _get_llms():
+def _get_provider_configs() -> list[dict]:
+    global _provider_configs
+    if _provider_configs is not None:
+        return _provider_configs
+    validate_config()
+    configs = []
     provider = os.getenv("LLM_PROVIDER", "gemini").lower()
-    default = _PROVIDER_DEFAULTS.get(provider, "gemma-4-26b-a4b-it")
-    generator = _make_llm(os.getenv("GENERATOR_MODEL") or default, 0.7)
-    grader = _make_llm(os.getenv("GRADER_MODEL") or default, 0.0)
-
-    fb_generators = []
-    fb_graders = []
+    default = _PROVIDER_DEFAULTS.get(provider, "")
+    configs.append({
+        "provider": provider,
+        "generator": os.getenv("GENERATOR_MODEL") or default,
+        "grader": os.getenv("GRADER_MODEL") or default,
+    })
     for i in (1, 2):
         fb_provider = os.getenv(f"FALLBACK{i}_PROVIDER", "").lower()
         if not fb_provider or fb_provider not in _PROVIDER_DEFAULTS:
@@ -152,17 +157,35 @@ def _get_llms():
         if not os.getenv(_PROVIDER_KEY_ENV[fb_provider]):
             continue
         fb_default = _PROVIDER_DEFAULTS[fb_provider]
-        fb_gen = os.getenv(f"FALLBACK{i}_GENERATOR_MODEL") or fb_default
-        fb_grd = os.getenv(f"FALLBACK{i}_GRADER_MODEL") or fb_default
-        fb_generators.append(_make_llm(fb_gen, 0.7, fb_provider))
-        fb_graders.append(_make_llm(fb_grd, 0.0, fb_provider))
+        configs.append({
+            "provider": fb_provider,
+            "generator": os.getenv(f"FALLBACK{i}_GENERATOR_MODEL") or fb_default,
+            "grader": os.getenv(f"FALLBACK{i}_GRADER_MODEL") or fb_default,
+        })
+    _provider_configs = configs
+    return configs
 
-    if fb_generators:
-        generator = generator.with_fallbacks(fb_generators, exceptions_to_handle=_RATE_LIMIT_EXCEPTIONS)
-    if fb_graders:
-        grader = grader.with_fallbacks(fb_graders, exceptions_to_handle=_RATE_LIMIT_EXCEPTIONS)
 
-    return generator, grader
+def _invoke_rotating(prompt: str, role: Literal["generator", "grader"]) -> str:
+    global _active_idx
+    configs = _get_provider_configs()
+    temperature = 0.7 if role == "generator" else 0.0
+    n = len(configs)
+    last_exc: Exception | None = None
+    for attempt in range(n):
+        idx = (_active_idx + attempt) % n
+        cfg = configs[idx]
+        llm = _make_llm(cfg[role], temperature, cfg["provider"])
+        try:
+            result = _extract_text(llm.invoke(prompt))
+            if attempt > 0:
+                logger.warning("Rate limit: rotated active provider to '%s'", cfg["provider"])
+                _active_idx = idx
+            return result
+        except _RATE_LIMIT_EXCEPTIONS as e:
+            logger.warning("Rate limit on provider '%s'", cfg["provider"])
+            last_exc = e
+    raise openai.RateLimitError("All LLM providers rate-limited") from last_exc
 
 
 def _extract_text(response) -> str:
@@ -187,7 +210,6 @@ def collect_topic(state: TutorState) -> dict:
 
 
 def generate_exercise(state: TutorState) -> dict:
-    generator, _ = _get_llms()
     past = state.get("past_exercises", [])
     past_text = "\n".join(f"- {ex}" for ex in past) if past else "нет"
     prompt = EXERCISE_PROMPT.format(
@@ -195,7 +217,7 @@ def generate_exercise(state: TutorState) -> dict:
         topic=state["topic"],
         past=past_text,
     )
-    exercise = _extract_text(generator.invoke(prompt)).strip()
+    exercise = _invoke_rotating(prompt, "generator").strip()
     return {
         "last_exercise": exercise,
         "past_exercises": past + [exercise],
@@ -210,14 +232,13 @@ def wait_for_answer(state: TutorState) -> dict:
 
 
 def check_answer(state: TutorState) -> dict:
-    _, grader = _get_llms()
     prompt = GRADE_PROMPT.format(
         language=state["language"],
         topic=state["topic"],
         exercise=state["last_exercise"],
         answer=state["last_answer"],
     )
-    raw = _extract_text(grader.invoke(prompt))
+    raw = _invoke_rotating(prompt, "grader")
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     data = json.loads(match.group()) if match else {}
     verdict = data.get("verdict", "INCORRECT").upper()
