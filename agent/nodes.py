@@ -252,7 +252,7 @@ def collect_topic(state: TutorState) -> dict:
     return {"topic": topic, "phase": "active"}
 
 
-def generate_exercise(state: TutorState) -> dict:
+def _exercise_result(state: TutorState) -> dict:
     past = state.get("past_exercises", [])
     past_text = "\n".join(f"- {ex}" for ex in past) if past else "нет"
     prompt = EXERCISE_PROMPT.format(
@@ -265,6 +265,21 @@ def generate_exercise(state: TutorState) -> dict:
         "last_exercise": exercise,
         "past_exercises": past + [exercise],
     }
+
+
+def init_exercise(state: TutorState) -> dict:
+    """Initial exercise generation — goes straight to wait_for_answer, no join needed."""
+    return _exercise_result(state)
+
+
+def generate_exercise(state: TutorState) -> dict:
+    """Exercise generation in the answer loop — joins with check_answer at update_state."""
+    return _exercise_result(state)
+
+
+def branch_answer(state: TutorState) -> dict:
+    """Fan-out point: triggers check_answer and generate_exercise in parallel."""
+    return {}
 
 
 def wait_for_answer(state: TutorState) -> dict:

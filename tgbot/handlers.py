@@ -152,10 +152,17 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = _config(chat_id)
 
     state: dict = {}
+    exercise_msg: str | None = None
+    feedback_sent = False
     try:
         async for chunk in graph.astream(Command(resume=text), config=config, stream_mode="updates"):
             for node_upd in chunk.values():
                 state.update(node_upd)
+            if "init_exercise" in chunk:
+                # initial generation path — no parallel grading, send immediately
+                exercise = chunk["init_exercise"].get("last_exercise", "")
+                if exercise:
+                    await update.message.reply_text(f"{exercise}\n\n{messages.NEXT_PROMPT}")
             if "check_answer" in chunk:
                 upd = chunk["check_answer"]
                 verdict = upd.get("last_verdict", "")
@@ -164,10 +171,18 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text(messages.CORRECT.format(feedback=feedback))
                 elif verdict == "INCORRECT":
                     await update.message.reply_text(messages.INCORRECT.format(feedback=feedback))
+                feedback_sent = True
+                if exercise_msg is not None:
+                    await update.message.reply_text(exercise_msg)
+                    exercise_msg = None
             if "generate_exercise" in chunk:
                 exercise = chunk["generate_exercise"].get("last_exercise", "")
                 if exercise:
-                    await update.message.reply_text(f"{exercise}\n\n{messages.NEXT_PROMPT}")
+                    msg = f"{exercise}\n\n{messages.NEXT_PROMPT}"
+                    if feedback_sent:
+                        await update.message.reply_text(msg)
+                    else:
+                        exercise_msg = msg  # buffer: grade still in flight
     except openai.RateLimitError:
         logger.warning("on_message: rate limited for chat_id=%s", chat_id)
         _user_sessions.pop(chat_id, None)
