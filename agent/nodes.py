@@ -16,10 +16,29 @@ from langgraph.types import interrupt
 logger = logging.getLogger(__name__)
 
 try:
-    from google.api_core.exceptions import ResourceExhausted as _GoogleRateLimitError
+    from google.api_core.exceptions import (
+        DeadlineExceeded as _GoogleDeadlineExceeded,
+        ResourceExhausted as _GoogleRateLimitError,
+        ServiceUnavailable as _GoogleServiceUnavailable,
+    )
     _RATE_LIMIT_EXCEPTIONS = (openai.RateLimitError, _GoogleRateLimitError)
+    _TRANSIENT_EXCEPTIONS = (
+        openai.APIConnectionError,
+        openai.APITimeoutError,
+        openai.InternalServerError,
+        _GoogleServiceUnavailable,
+        _GoogleDeadlineExceeded,
+    )
 except ImportError:
     _RATE_LIMIT_EXCEPTIONS = (openai.RateLimitError,)
+    _TRANSIENT_EXCEPTIONS = (
+        openai.APIConnectionError,
+        openai.APITimeoutError,
+        openai.InternalServerError,
+    )
+
+_TRANSIENT_RETRIES = 3
+_TRANSIENT_RETRY_DELAY = 1.0
 
 from .state import TutorState
 from .prompts import EXERCISE_PROMPT, GRADE_PROMPT
@@ -181,20 +200,35 @@ def _invoke_rotating(prompt: str, role: Literal["generator", "grader"]) -> str:
     now = time.monotonic()
     available = [c for c in configs if now >= _rate_limited_until.get((c["provider"], c[role]), 0)]
     cooling = [c for c in configs if now < _rate_limited_until.get((c["provider"], c[role]), 0)]
-    last_exc: Exception | None = None
+    last_exc: Exception = openai.RateLimitError("All LLM providers exhausted")
     for cfg in available + cooling:
         llm = _make_llm(cfg[role], temperature, cfg["provider"])
-        try:
-            logger.info("LLM invoke: provider=%s model=%s role=%s", cfg["provider"], cfg[role], role)
-            t0 = time.monotonic()
-            result = _extract_text(llm.invoke(prompt))
-            logger.info("LLM done: provider=%s model=%s role=%s duration=%.2fs", cfg["provider"], cfg[role], role, time.monotonic() - t0)
-            return result
-        except _RATE_LIMIT_EXCEPTIONS as e:
-            _rate_limited_until[(cfg["provider"], cfg[role])] = time.monotonic() + _PROVIDER_COOLDOWN
-            logger.warning("Rate limit on %s/%s, cooldown %ds", cfg["provider"], cfg[role], _PROVIDER_COOLDOWN)
-            last_exc = e
-    raise openai.RateLimitError("All LLM providers rate-limited") from last_exc
+        for attempt in range(_TRANSIENT_RETRIES):
+            try:
+                logger.info("LLM invoke: provider=%s model=%s role=%s", cfg["provider"], cfg[role], role)
+                t0 = time.monotonic()
+                result = _extract_text(llm.invoke(prompt))
+                logger.info("LLM done: provider=%s model=%s role=%s duration=%.2fs", cfg["provider"], cfg[role], role, time.monotonic() - t0)
+                return result
+            except _RATE_LIMIT_EXCEPTIONS as e:
+                _rate_limited_until[(cfg["provider"], cfg[role])] = time.monotonic() + _PROVIDER_COOLDOWN
+                logger.warning("Rate limit on %s/%s, cooldown %ds", cfg["provider"], cfg[role], _PROVIDER_COOLDOWN)
+                last_exc = e
+                break
+            except _TRANSIENT_EXCEPTIONS as e:
+                last_exc = e
+                if attempt < _TRANSIENT_RETRIES - 1:
+                    logger.warning(
+                        "Transient error on %s/%s (attempt %d/%d): %s, retrying in %.0fs",
+                        cfg["provider"], cfg[role], attempt + 1, _TRANSIENT_RETRIES, e, _TRANSIENT_RETRY_DELAY,
+                    )
+                    time.sleep(_TRANSIENT_RETRY_DELAY)
+                else:
+                    logger.warning(
+                        "Transient error on %s/%s (attempt %d/%d): %s, rotating to next provider",
+                        cfg["provider"], cfg[role], attempt + 1, _TRANSIENT_RETRIES, e,
+                    )
+    raise last_exc
 
 
 def _extract_text(response) -> str:
