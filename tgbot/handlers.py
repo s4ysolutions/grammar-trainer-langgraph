@@ -151,21 +151,53 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     config = _config(chat_id)
 
+    state: dict = {}
+    exercise_msg: str | None = None
+    feedback_sent = False
     try:
-        state = await graph.ainvoke(Command(resume=text), config=config)
+        async for chunk in graph.astream(Command(resume=text), config=config, stream_mode="updates"):
+            for node_upd in chunk.values():
+                state.update(node_upd)
+            if "init_exercise" in chunk:
+                # initial generation path — no parallel grading, send immediately
+                exercise = chunk["init_exercise"].get("last_exercise", "")
+                if exercise:
+                    await update.message.reply_text(f"{exercise}\n\n{messages.NEXT_PROMPT}")
+            if "check_answer" in chunk:
+                upd = chunk["check_answer"]
+                verdict = upd.get("last_verdict", "")
+                feedback = upd.get("feedback", "")
+                if verdict == "CORRECT":
+                    await update.message.reply_text(messages.CORRECT.format(feedback=feedback))
+                elif verdict == "INCORRECT":
+                    await update.message.reply_text(messages.INCORRECT.format(feedback=feedback))
+                feedback_sent = True
+                if exercise_msg is not None:
+                    await update.message.reply_text(exercise_msg)
+                    exercise_msg = None
+            if "generate_exercise" in chunk:
+                exercise = chunk["generate_exercise"].get("last_exercise", "")
+                if exercise:
+                    msg = f"{exercise}\n\n{messages.NEXT_PROMPT}"
+                    if feedback_sent:
+                        await update.message.reply_text(msg)
+                    else:
+                        exercise_msg = msg  # buffer: grade still in flight
     except openai.RateLimitError:
         logger.warning("on_message: rate limited for chat_id=%s", chat_id)
         _user_sessions.pop(chat_id, None)
         await update.message.reply_text(messages.RATE_LIMIT)
         return
     except Exception:
-        logger.exception("on_message: graph.ainvoke failed for chat_id=%s", chat_id)
+        logger.exception("on_message: graph.astream failed for chat_id=%s", chat_id)
         await update.message.reply_text(messages.NO_SESSION)
         return
 
     if state.get("phase") == "done":
-        total = state.get("turn_count", 0)
-        correct = state.get("correct_count", 0)
+        snapshot = await graph.aget_state(config)
+        full = snapshot.values
+        total = full.get("turn_count", 0)
+        correct = full.get("correct_count", 0)
         pct = round(correct / total * 100) if total else 0
         _user_sessions.pop(chat_id, None)
         await update.message.reply_text(
@@ -180,21 +212,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state.get("topic"):
         _user_topics[chat_id] = state["topic"]
-
-    reply_parts = []
-    verdict = state.get("last_verdict", "")
-    feedback = state.get("feedback", "")
-    if verdict == "CORRECT":
-        reply_parts.append(messages.CORRECT.format(feedback=feedback))
-    elif verdict == "INCORRECT":
-        reply_parts.append(messages.INCORRECT.format(feedback=feedback))
-
-    exercise = state.get("last_exercise", "")
-    if exercise:
-        reply_parts.append(f"\n{exercise}\n\n{messages.NEXT_PROMPT}")
-
-    if reply_parts:
-        await update.message.reply_text("\n".join(reply_parts))
 
 
 def build_app(token: str) -> Application:

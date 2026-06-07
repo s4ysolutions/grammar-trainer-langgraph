@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from dotenv import load_dotenv
 load_dotenv()
 
-from agent.nodes import validate_config, _get_llms, _extract_text
+from agent.nodes import validate_config, _get_provider_configs, _invoke_rotating
 
 
 def main():
@@ -24,11 +24,13 @@ def main():
         sys.exit(1)
     print("Config   : OK")
 
+    configs = _get_provider_configs()
+    print(f"Chain    : {' -> '.join(c['provider'] for c in configs)}")
+
     print("LLM call : sending test prompt...")
     try:
-        generator, grader = _get_llms()
         t0 = time.monotonic()
-        response = _extract_text(generator.invoke("Reply with exactly one word: OK"))
+        response = _invoke_rotating("Reply with exactly one word: OK", "generator")
         elapsed = time.monotonic() - t0
     except Exception as e:
         print(f"FAIL     : {e}")
