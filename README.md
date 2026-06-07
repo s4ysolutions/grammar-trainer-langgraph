@@ -1,4 +1,4 @@
-# english-grammar
+# Any Lang, Any topic
 
 Grammar tutor bot. Supports any language. UI language is configurable (default: Russian). Exercises in the target language.
 
