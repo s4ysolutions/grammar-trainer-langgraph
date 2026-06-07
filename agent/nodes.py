@@ -200,7 +200,7 @@ def _invoke_rotating(prompt: str, role: Literal["generator", "grader"]) -> str:
     now = time.monotonic()
     available = [c for c in configs if now >= _rate_limited_until.get((c["provider"], c[role]), 0)]
     cooling = [c for c in configs if now < _rate_limited_until.get((c["provider"], c[role]), 0)]
-    last_exc: Exception = openai.RateLimitError("All LLM providers exhausted")
+    last_exc: Exception = RuntimeError("All LLM providers exhausted")
     for cfg in available + cooling:
         llm = _make_llm(cfg[role], temperature, cfg["provider"])
         for attempt in range(_TRANSIENT_RETRIES):
