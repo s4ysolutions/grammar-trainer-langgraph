@@ -157,7 +157,8 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         async for chunk in graph.astream(Command(resume=text), config=config, stream_mode="updates"):
             for node_upd in chunk.values():
-                state.update(node_upd)
+                if isinstance(node_upd, dict):
+                    state.update(node_upd)
             if "init_exercise" in chunk:
                 # initial generation path — no parallel grading, send immediately
                 exercise = chunk["init_exercise"].get("last_exercise", "")
