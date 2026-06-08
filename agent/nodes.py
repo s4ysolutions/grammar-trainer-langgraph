@@ -166,7 +166,7 @@ class _ZhipuAIWrapper:
 
     def invoke(self, prompt):
         from zhipuai import ZhipuAI
-        client = ZhipuAI(api_key=os.getenv("ZHIPUAI_API_KEY", ""))
+        client = ZhipuAI(api_key=os.getenv("ZHIPUAI_API_KEY", ""), timeout=30)
         text = prompt if isinstance(prompt, str) else str(prompt)
         resp = client.chat.completions.create(
             model=self._model,
