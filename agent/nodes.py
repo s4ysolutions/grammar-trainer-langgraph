@@ -72,6 +72,7 @@ _PROVIDER_DEFAULTS = {
     "openrouter": "meta-llama/llama-3.1-8b-instruct",
     "glm": "glm-4-flash",
     "deepseek": "deepseek-chat",
+    "qwen": "qwen-plus",
 }
 
 _PROVIDER_KEY_ENV = {
@@ -81,11 +82,13 @@ _PROVIDER_KEY_ENV = {
     "openrouter": "OPENROUTER_API_KEY",
     "glm": "ZHIPUAI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
 }
 
 _HUGGINGFACE_DEFAULT_BASE_URL = "https://router.huggingface.co/hf-inference/v1"
 _OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 _DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+_QWEN_DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 
 def _huggingface_base_url() -> str:
@@ -98,6 +101,10 @@ def _openrouter_base_url() -> str:
 
 def _deepseek_base_url() -> str:
     return os.getenv("DEEPSEEK_BASE_URL") or _DEEPSEEK_DEFAULT_BASE_URL
+
+
+def _qwen_base_url() -> str:
+    return os.getenv("QWEN_BASE_URL") or _QWEN_DEFAULT_BASE_URL
 
 
 def _tcp_probe(url: str, label: str, url_env_var: str, default_url: str) -> None:
@@ -149,6 +156,11 @@ def validate_config() -> None:
         _tcp_probe(
             _deepseek_base_url(), "DeepSeek API",
             "DEEPSEEK_BASE_URL", _DEEPSEEK_DEFAULT_BASE_URL,
+        )
+    elif provider == "qwen":
+        _tcp_probe(
+            _qwen_base_url(), "Qwen API",
+            "QWEN_BASE_URL", _QWEN_DEFAULT_BASE_URL,
         )
 
     for i in (1, 2):
@@ -220,6 +232,14 @@ def _make_llm(model: str, temperature: float, provider: str):
             max_retries=0,
             openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
             openai_api_base=_deepseek_base_url(),
+        )
+    if provider == "qwen":
+        return ChatOpenAI(
+            model=model,
+            temperature=temperature,
+            max_retries=0,
+            openai_api_key=os.getenv("DASHSCOPE_API_KEY", ""),
+            openai_api_base=_qwen_base_url(),
         )
     return ChatGoogleGenerativeAI(model=model, temperature=temperature)
 
@@ -374,14 +394,6 @@ def check_answer(state: TutorState) -> dict:
     }
 
 
-def on_correct(state: TutorState) -> dict:
-    return {}
-
-
-def on_incorrect(state: TutorState) -> dict:
-    return {}
-
-
 def update_state(state: TutorState) -> dict:
     return {
         "turn_count": state.get("turn_count", 0) + 1,
@@ -399,7 +411,3 @@ def route_after_wait(state: TutorState) -> str:
     return "check_answer"
 
 
-def route_verdict(state: TutorState) -> Literal["on_correct", "on_incorrect"]:
-    if state.get("last_verdict") == "CORRECT":
-        return "on_correct"
-    return "on_incorrect"
