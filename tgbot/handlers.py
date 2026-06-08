@@ -42,34 +42,34 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     config = _new_session(chat_id)
     await graph.ainvoke(make_initial_state(), config=config)
-    await update.message.reply_text(messages.WELCOME)
+    await update.effective_message.reply_text(messages.WELCOME)
 
 
 async def cmd_lang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     lang = " ".join(context.args).strip() if context.args else ""
     if not lang:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Использование: /lang <язык>  Пример: /lang Spanish"
         )
         return
     _user_languages[chat_id] = lang
     config = _new_session(chat_id)
     await graph.ainvoke(make_initial_state(phase="topic", language=lang), config=config)
-    await update.message.reply_text(messages.LANG_CHANGED.format(language=lang))
+    await update.effective_message.reply_text(messages.LANG_CHANGED.format(language=lang))
 
 
 async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     topic = " ".join(context.args).strip() if context.args else ""
     if not topic:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Использование: /topic <тема>  Пример: /topic past tense"
         )
         return
     lang = _user_languages.get(chat_id, "")
     if not lang:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Сначала укажи язык: /lang English  или начни с /start"
         )
         return
@@ -83,14 +83,14 @@ async def cmd_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except openai.RateLimitError:
         logger.warning("cmd_topic: rate limited for chat_id=%s", chat_id)
         _user_sessions.pop(chat_id, None)
-        await update.message.reply_text(messages.RATE_LIMIT)
+        await update.effective_message.reply_text(messages.RATE_LIMIT)
         return
     except Exception:
         logger.exception("cmd_topic: graph.ainvoke failed for chat_id=%s", chat_id)
-        await update.message.reply_text(messages.ERROR)
+        await update.effective_message.reply_text(messages.ERROR)
         return
     exercise = state.get("last_exercise", "")
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         f"{exercise}\n\n{messages.NEXT_PROMPT}" if exercise else messages.ERROR
     )
 
@@ -102,13 +102,13 @@ async def cmd_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state = await graph.ainvoke(Command(resume="/end"), config=config)
     except Exception:
         logger.exception("cmd_end: graph.ainvoke failed for chat_id=%s", chat_id)
-        await update.message.reply_text(messages.NO_SESSION)
+        await update.effective_message.reply_text(messages.NO_SESSION)
         return
     total = state.get("turn_count", 0)
     correct = state.get("correct_count", 0)
     pct = round(correct / total * 100) if total else 0
     _user_sessions.pop(chat_id, None)
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         messages.STATS.format(correct=correct, total=total, pct=pct)
     )
 
@@ -118,7 +118,7 @@ async def cmd_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = _user_languages.get(chat_id, "")
     topic = _user_topics.get(chat_id, "")
     if not lang or not topic:
-        await update.message.reply_text(messages.NO_SESSION)
+        await update.effective_message.reply_text(messages.NO_SESSION)
         return
     _user_topics[chat_id] = topic
     config = _new_session(chat_id)
@@ -130,14 +130,14 @@ async def cmd_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except openai.RateLimitError:
         logger.warning("cmd_continue: rate limited for chat_id=%s", chat_id)
         _user_sessions.pop(chat_id, None)
-        await update.message.reply_text(messages.RATE_LIMIT)
+        await update.effective_message.reply_text(messages.RATE_LIMIT)
         return
     except Exception:
         logger.exception("cmd_continue: graph.ainvoke failed for chat_id=%s", chat_id)
-        await update.message.reply_text(messages.ERROR)
+        await update.effective_message.reply_text(messages.ERROR)
         return
     exercise = state.get("last_exercise", "")
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         f"{exercise}\n\n{messages.NEXT_PROMPT}" if exercise else messages.ERROR
     )
 
@@ -145,10 +145,10 @@ async def cmd_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id not in _user_sessions:
-        await update.message.reply_text(messages.NO_SESSION)
+        await update.effective_message.reply_text(messages.NO_SESSION)
         return
 
-    text = update.message.text.strip()
+    text = update.effective_message.text.strip()
     config = _config(chat_id)
 
     state: dict = {}
@@ -163,35 +163,35 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # initial generation path — no parallel grading, send immediately
                 exercise = chunk["init_exercise"].get("last_exercise", "")
                 if exercise:
-                    await update.message.reply_text(f"{exercise}\n\n{messages.NEXT_PROMPT}")
+                    await update.effective_message.reply_text(f"{exercise}\n\n{messages.NEXT_PROMPT}")
             if "check_answer" in chunk:
                 upd = chunk["check_answer"]
                 verdict = upd.get("last_verdict", "")
                 feedback = upd.get("feedback", "")
                 if verdict == "CORRECT":
-                    await update.message.reply_text(messages.CORRECT.format(feedback=feedback))
+                    await update.effective_message.reply_text(messages.CORRECT.format(feedback=feedback))
                 elif verdict == "INCORRECT":
-                    await update.message.reply_text(messages.INCORRECT.format(feedback=feedback))
+                    await update.effective_message.reply_text(messages.INCORRECT.format(feedback=feedback))
                 feedback_sent = True
                 if exercise_msg is not None:
-                    await update.message.reply_text(exercise_msg)
+                    await update.effective_message.reply_text(exercise_msg)
                     exercise_msg = None
             if "generate_exercise" in chunk:
                 exercise = chunk["generate_exercise"].get("last_exercise", "")
                 if exercise:
                     msg = f"{exercise}\n\n{messages.NEXT_PROMPT}"
                     if feedback_sent:
-                        await update.message.reply_text(msg)
+                        await update.effective_message.reply_text(msg)
                     else:
                         exercise_msg = msg  # buffer: grade still in flight
     except openai.RateLimitError:
         logger.warning("on_message: rate limited for chat_id=%s", chat_id)
         _user_sessions.pop(chat_id, None)
-        await update.message.reply_text(messages.RATE_LIMIT)
+        await update.effective_message.reply_text(messages.RATE_LIMIT)
         return
     except Exception:
         logger.exception("on_message: graph.astream failed for chat_id=%s", chat_id)
-        await update.message.reply_text(messages.NO_SESSION)
+        await update.effective_message.reply_text(messages.NO_SESSION)
         return
 
     if state.get("phase") == "done":
@@ -201,14 +201,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         correct = full.get("correct_count", 0)
         pct = round(correct / total * 100) if total else 0
         _user_sessions.pop(chat_id, None)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             messages.STATS.format(correct=correct, total=total, pct=pct)
         )
         return
 
     if state.get("phase") == "topic":
         _user_languages[chat_id] = state.get("language", "")
-        await update.message.reply_text(messages.CHOOSE_TOPIC)
+        await update.effective_message.reply_text(messages.CHOOSE_TOPIC)
         return
 
     if state.get("topic"):
