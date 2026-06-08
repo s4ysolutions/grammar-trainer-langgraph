@@ -13,6 +13,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -37,6 +38,22 @@ except ImportError:
         openai.InternalServerError,
     )
 
+try:
+    from zhipuai import (
+        RateLimitError as _ZhipuRateLimitError,
+        APIConnectionError as _ZhipuConnectionError,
+        APITimeoutError as _ZhipuTimeoutError,
+        InternalServerError as _ZhipuInternalError,
+    )
+    _RATE_LIMIT_EXCEPTIONS = _RATE_LIMIT_EXCEPTIONS + (_ZhipuRateLimitError,)
+    _TRANSIENT_EXCEPTIONS = _TRANSIENT_EXCEPTIONS + (
+        _ZhipuConnectionError,
+        _ZhipuTimeoutError,
+        _ZhipuInternalError,
+    )
+except ImportError:
+    pass
+
 _TRANSIENT_RETRIES = 3
 _TRANSIENT_RETRY_DELAY = 1.0
 
@@ -53,6 +70,7 @@ _PROVIDER_DEFAULTS = {
     "huggingface": "meta-llama/Llama-3.1-8B-Instruct",
     "gemini": "gemma-4-26b-a4b-it",
     "openrouter": "meta-llama/llama-3.1-8b-instruct",
+    "glm": "glm-4-flash",
 }
 
 _PROVIDER_KEY_ENV = {
@@ -60,6 +78,7 @@ _PROVIDER_KEY_ENV = {
     "huggingface": "HUGGINGFACE_API_KEY",
     "gemini": "GOOGLE_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "glm": "ZHIPUAI_API_KEY",
 }
 
 _HUGGINGFACE_DEFAULT_BASE_URL = "https://router.huggingface.co/hf-inference/v1"
@@ -138,6 +157,29 @@ def validate_config() -> None:
             )
 
 
+class _ZhipuAIWrapper:
+    """Thin wrapper around zhipuai SDK — handles JWT auth that ChatOpenAI can't."""
+
+    def __init__(self, model: str, temperature: float):
+        self._model = model
+        self._temperature = temperature
+
+    def invoke(self, prompt):
+        from zhipuai import ZhipuAI
+        client = ZhipuAI(api_key=os.getenv("ZHIPUAI_API_KEY", ""))
+        text = prompt if isinstance(prompt, str) else str(prompt)
+        resp = client.chat.completions.create(
+            model=self._model,
+            messages=[{"role": "user", "content": text}],
+            temperature=self._temperature,
+            extra_headers={"Accept-Language": "en-US,en"},
+        )
+
+        class _R:
+            content = resp.choices[0].message.content or ""
+        return _R()
+
+
 def _make_llm(model: str, temperature: float, provider: str):
     if provider == "openai":
         return ChatOpenAI(model=model, temperature=temperature, max_retries=0)
@@ -157,6 +199,8 @@ def _make_llm(model: str, temperature: float, provider: str):
             openai_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             openai_api_base=_openrouter_base_url(),
         )
+    if provider == "glm":
+        return _ZhipuAIWrapper(model=model, temperature=temperature)
     return ChatGoogleGenerativeAI(model=model, temperature=temperature)
 
 
