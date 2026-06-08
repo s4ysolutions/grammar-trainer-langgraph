@@ -1,4 +1,8 @@
-from typing import TypedDict, Literal
+from typing import Annotated, TypedDict, Literal
+
+
+def _last(a, b):
+    return b
 
 
 class TutorState(TypedDict):
@@ -7,10 +11,10 @@ class TutorState(TypedDict):
     topic: str
     past_exercises: list[str]
     last_exercise: str
-    last_answer: str
+    last_answer: Annotated[str, _last]
     feedback: str
     last_verdict: str
-    turn_count: int
+    turn_count: Annotated[int, _last]
     correct_count: int
     incorrect_count: int
 

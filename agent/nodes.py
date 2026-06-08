@@ -13,6 +13,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langgraph.types import interrupt
 
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -37,6 +38,22 @@ except ImportError:
         openai.InternalServerError,
     )
 
+try:
+    from zhipuai import (
+        RateLimitError as _ZhipuRateLimitError,
+        APIConnectionError as _ZhipuConnectionError,
+        APITimeoutError as _ZhipuTimeoutError,
+        InternalServerError as _ZhipuInternalError,
+    )
+    _RATE_LIMIT_EXCEPTIONS = _RATE_LIMIT_EXCEPTIONS + (_ZhipuRateLimitError,)
+    _TRANSIENT_EXCEPTIONS = _TRANSIENT_EXCEPTIONS + (
+        _ZhipuConnectionError,
+        _ZhipuTimeoutError,
+        _ZhipuInternalError,
+    )
+except ImportError:
+    pass
+
 _TRANSIENT_RETRIES = 3
 _TRANSIENT_RETRY_DELAY = 1.0
 
@@ -46,6 +63,7 @@ from .prompts import EXERCISE_PROMPT, GRADE_PROMPT
 _provider_configs: list[dict] | None = None
 _rate_limited_until: dict[tuple[str, str], float] = {}
 _PROVIDER_COOLDOWN = int(os.getenv("PROVIDER_COOLDOWN", "300"))
+_PAST_EXERCISES_LIMIT = int(os.getenv("PAST_EXERCISES_LIMIT", "5"))
 
 
 _PROVIDER_DEFAULTS = {
@@ -53,6 +71,9 @@ _PROVIDER_DEFAULTS = {
     "huggingface": "meta-llama/Llama-3.1-8B-Instruct",
     "gemini": "gemma-4-26b-a4b-it",
     "openrouter": "meta-llama/llama-3.1-8b-instruct",
+    "glm": "glm-4-flash",
+    "deepseek": "deepseek-chat",
+    "qwen": "qwen-plus",
 }
 
 _PROVIDER_KEY_ENV = {
@@ -60,10 +81,15 @@ _PROVIDER_KEY_ENV = {
     "huggingface": "HUGGINGFACE_API_KEY",
     "gemini": "GOOGLE_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "glm": "ZHIPUAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
 }
 
 _HUGGINGFACE_DEFAULT_BASE_URL = "https://router.huggingface.co/hf-inference/v1"
 _OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+_DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+_QWEN_DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 
 def _huggingface_base_url() -> str:
@@ -72,6 +98,14 @@ def _huggingface_base_url() -> str:
 
 def _openrouter_base_url() -> str:
     return os.getenv("OPENROUTER_BASE_URL") or _OPENROUTER_DEFAULT_BASE_URL
+
+
+def _deepseek_base_url() -> str:
+    return os.getenv("DEEPSEEK_BASE_URL") or _DEEPSEEK_DEFAULT_BASE_URL
+
+
+def _qwen_base_url() -> str:
+    return os.getenv("QWEN_BASE_URL") or _QWEN_DEFAULT_BASE_URL
 
 
 def _tcp_probe(url: str, label: str, url_env_var: str, default_url: str) -> None:
@@ -119,6 +153,16 @@ def validate_config() -> None:
             _openrouter_base_url(), "OpenRouter API",
             "OPENROUTER_BASE_URL", _OPENROUTER_DEFAULT_BASE_URL,
         )
+    elif provider == "deepseek":
+        _tcp_probe(
+            _deepseek_base_url(), "DeepSeek API",
+            "DEEPSEEK_BASE_URL", _DEEPSEEK_DEFAULT_BASE_URL,
+        )
+    elif provider == "qwen":
+        _tcp_probe(
+            _qwen_base_url(), "Qwen API",
+            "QWEN_BASE_URL", _QWEN_DEFAULT_BASE_URL,
+        )
 
     for i in (1, 2):
         fb_provider = os.getenv(f"FALLBACK{i}_PROVIDER", "").lower()
@@ -136,6 +180,29 @@ def validate_config() -> None:
                 "FALLBACK%d_PROVIDER='%s' requires %s — fallback will be skipped",
                 i, fb_provider, fb_key_var,
             )
+
+
+class _ZhipuAIWrapper:
+    """Thin wrapper around zhipuai SDK — handles JWT auth that ChatOpenAI can't."""
+
+    def __init__(self, model: str, temperature: float):
+        self._model = model
+        self._temperature = temperature
+
+    def invoke(self, prompt):
+        from zhipuai import ZhipuAI
+        client = ZhipuAI(api_key=os.getenv("ZHIPUAI_API_KEY", ""), timeout=30)
+        text = prompt if isinstance(prompt, str) else str(prompt)
+        resp = client.chat.completions.create(
+            model=self._model,
+            messages=[{"role": "user", "content": text}],
+            temperature=self._temperature,
+            extra_headers={"Accept-Language": "en-US,en"},
+        )
+
+        class _R:
+            content = resp.choices[0].message.content or ""
+        return _R()
 
 
 def _make_llm(model: str, temperature: float, provider: str):
@@ -156,6 +223,24 @@ def _make_llm(model: str, temperature: float, provider: str):
             max_retries=0,
             openai_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             openai_api_base=_openrouter_base_url(),
+        )
+    if provider == "glm":
+        return _ZhipuAIWrapper(model=model, temperature=temperature)
+    if provider == "deepseek":
+        return ChatOpenAI(
+            model=model,
+            temperature=temperature,
+            max_retries=0,
+            openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            openai_api_base=_deepseek_base_url(),
+        )
+    if provider == "qwen":
+        return ChatOpenAI(
+            model=model,
+            temperature=temperature,
+            max_retries=0,
+            openai_api_key=os.getenv("DASHSCOPE_API_KEY", ""),
+            openai_api_base=_qwen_base_url(),
         )
     return ChatGoogleGenerativeAI(model=model, temperature=temperature)
 
@@ -263,7 +348,7 @@ def _exercise_result(state: TutorState) -> dict:
     exercise = _invoke_rotating(prompt, "generator").strip()
     return {
         "last_exercise": exercise,
-        "past_exercises": past + [exercise],
+        "past_exercises": (past + [exercise])[-_PAST_EXERCISES_LIMIT:],
     }
 
 
@@ -310,14 +395,6 @@ def check_answer(state: TutorState) -> dict:
     }
 
 
-def on_correct(state: TutorState) -> dict:
-    return {}
-
-
-def on_incorrect(state: TutorState) -> dict:
-    return {}
-
-
 def update_state(state: TutorState) -> dict:
     return {
         "turn_count": state.get("turn_count", 0) + 1,
@@ -335,7 +412,3 @@ def route_after_wait(state: TutorState) -> str:
     return "check_answer"
 
 
-def route_verdict(state: TutorState) -> Literal["on_correct", "on_incorrect"]:
-    if state.get("last_verdict") == "CORRECT":
-        return "on_correct"
-    return "on_incorrect"
