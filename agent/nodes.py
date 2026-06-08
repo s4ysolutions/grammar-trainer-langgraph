@@ -63,6 +63,7 @@ from .prompts import EXERCISE_PROMPT, GRADE_PROMPT
 _provider_configs: list[dict] | None = None
 _rate_limited_until: dict[tuple[str, str], float] = {}
 _PROVIDER_COOLDOWN = int(os.getenv("PROVIDER_COOLDOWN", "300"))
+_PAST_EXERCISES_LIMIT = int(os.getenv("PAST_EXERCISES_LIMIT", "5"))
 
 
 _PROVIDER_DEFAULTS = {
@@ -347,7 +348,7 @@ def _exercise_result(state: TutorState) -> dict:
     exercise = _invoke_rotating(prompt, "generator").strip()
     return {
         "last_exercise": exercise,
-        "past_exercises": past + [exercise],
+        "past_exercises": (past + [exercise])[-_PAST_EXERCISES_LIMIT:],
     }
 
 
