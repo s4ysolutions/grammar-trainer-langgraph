@@ -1,3 +1,5 @@
+import os
+
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -11,13 +13,14 @@ def build_graph(checkpointer=None):
 
     _nodes.validate_config()
 
+    parallel = os.getenv("PARALLEL_GENERATION", "1") == "1"
+
     builder = StateGraph(TutorState)
 
     # Use lambdas so that patches applied to agent.nodes are respected at call time.
     builder.add_node("collect_language", lambda s: _nodes.collect_language(s))
     builder.add_node("collect_topic", lambda s: _nodes.collect_topic(s))
     builder.add_node("init_exercise", lambda s: _nodes.init_exercise(s))
-    builder.add_node("branch_answer", lambda s: _nodes.branch_answer(s))
     builder.add_node("check_answer", lambda s: _nodes.check_answer(s))
     builder.add_node("generate_exercise", lambda s: _nodes.generate_exercise(s))
     builder.add_node("wait_for_answer", lambda s: _nodes.wait_for_answer(s))
@@ -41,19 +44,6 @@ def build_graph(checkpointer=None):
     builder.add_edge("init_exercise", "wait_for_answer")
 
     builder.add_conditional_edges(
-        "wait_for_answer",
-        lambda s: _nodes.route_after_wait(s),
-        {
-            "check_answer": "branch_answer",
-            "end": END,
-        },
-    )
-
-    # parallel fan-out: both start when user submits an answer
-    builder.add_edge("branch_answer", "check_answer")
-    builder.add_edge("branch_answer", "generate_exercise")
-
-    builder.add_conditional_edges(
         "check_answer",
         lambda s: _nodes.route_verdict(s),
         {
@@ -62,10 +52,31 @@ def build_graph(checkpointer=None):
         },
     )
 
-    # fan-in: update_state waits for both check_answer chain and generate_exercise
-    builder.add_edge("on_correct", "update_state")
-    builder.add_edge("on_incorrect", "update_state")
-    builder.add_edge("generate_exercise", "update_state")
-    builder.add_edge("update_state", "wait_for_answer")
+    if parallel:
+        # fan-out: grade and generate run concurrently
+        # NOTE: fan-in at update_state may cause InvalidUpdateError on some LangGraph versions
+        builder.add_node("branch_answer", lambda s: _nodes.branch_answer(s))
+        builder.add_conditional_edges(
+            "wait_for_answer",
+            lambda s: _nodes.route_after_wait(s),
+            {"check_answer": "branch_answer", "end": END},
+        )
+        builder.add_edge("branch_answer", "check_answer")
+        builder.add_edge("branch_answer", "generate_exercise")
+        builder.add_edge("on_correct", "update_state")
+        builder.add_edge("on_incorrect", "update_state")
+        builder.add_edge("generate_exercise", "update_state")
+        builder.add_edge("update_state", "wait_for_answer")
+    else:
+        # sequential: grade first, then generate next exercise
+        builder.add_conditional_edges(
+            "wait_for_answer",
+            lambda s: _nodes.route_after_wait(s),
+            {"check_answer": "check_answer", "end": END},
+        )
+        builder.add_edge("on_correct", "update_state")
+        builder.add_edge("on_incorrect", "update_state")
+        builder.add_edge("update_state", "generate_exercise")
+        builder.add_edge("generate_exercise", "wait_for_answer")
 
     return builder.compile(checkpointer=checkpointer)
