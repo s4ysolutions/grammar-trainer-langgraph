@@ -71,6 +71,7 @@ _PROVIDER_DEFAULTS = {
     "gemini": "gemma-4-26b-a4b-it",
     "openrouter": "meta-llama/llama-3.1-8b-instruct",
     "glm": "glm-4-flash",
+    "deepseek": "deepseek-chat",
 }
 
 _PROVIDER_KEY_ENV = {
@@ -79,10 +80,12 @@ _PROVIDER_KEY_ENV = {
     "gemini": "GOOGLE_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
     "glm": "ZHIPUAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
 }
 
 _HUGGINGFACE_DEFAULT_BASE_URL = "https://router.huggingface.co/hf-inference/v1"
 _OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+_DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 
 
 def _huggingface_base_url() -> str:
@@ -91,6 +94,10 @@ def _huggingface_base_url() -> str:
 
 def _openrouter_base_url() -> str:
     return os.getenv("OPENROUTER_BASE_URL") or _OPENROUTER_DEFAULT_BASE_URL
+
+
+def _deepseek_base_url() -> str:
+    return os.getenv("DEEPSEEK_BASE_URL") or _DEEPSEEK_DEFAULT_BASE_URL
 
 
 def _tcp_probe(url: str, label: str, url_env_var: str, default_url: str) -> None:
@@ -137,6 +144,11 @@ def validate_config() -> None:
         _tcp_probe(
             _openrouter_base_url(), "OpenRouter API",
             "OPENROUTER_BASE_URL", _OPENROUTER_DEFAULT_BASE_URL,
+        )
+    elif provider == "deepseek":
+        _tcp_probe(
+            _deepseek_base_url(), "DeepSeek API",
+            "DEEPSEEK_BASE_URL", _DEEPSEEK_DEFAULT_BASE_URL,
         )
 
     for i in (1, 2):
@@ -201,6 +213,14 @@ def _make_llm(model: str, temperature: float, provider: str):
         )
     if provider == "glm":
         return _ZhipuAIWrapper(model=model, temperature=temperature)
+    if provider == "deepseek":
+        return ChatOpenAI(
+            model=model,
+            temperature=temperature,
+            max_retries=0,
+            openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            openai_api_base=_deepseek_base_url(),
+        )
     return ChatGoogleGenerativeAI(model=model, temperature=temperature)
 
 

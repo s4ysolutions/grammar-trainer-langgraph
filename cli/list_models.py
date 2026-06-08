@@ -51,6 +51,14 @@ def list_glm():
         print(m.id)
 
 
+def list_deepseek():
+    from agent.nodes import _deepseek_base_url
+    import openai
+    client = openai.OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url=_deepseek_base_url())
+    for m in sorted(client.models.list(), key=lambda m: m.id):
+        print(m.id)
+
+
 def main():
     provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
     print(f"Provider: {provider}\n")
@@ -71,6 +79,8 @@ def main():
             list_openrouter()
         elif provider == "glm":
             list_glm()
+        elif provider == "deepseek":
+            list_deepseek()
     except Exception as e:
         print(f"FAIL: {e}")
         sys.exit(1)
